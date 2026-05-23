@@ -1,0 +1,238 @@
+
+#  Project 3: AI Recommendation Logic
+
+import math
+from collections import Counter
+
+# ── DATASET: Job Roles as "Items" ────
+
+JOB_ROLES = {
+    "Data Scientist": [
+        "python", "machine learning", "statistics", "sql",
+        "data analysis", "numpy", "pandas", "tensorflow",
+        "deep learning", "data visualization", "jupyter"
+    ],
+    "Machine Learning Engineer": [
+        "python", "machine learning", "tensorflow", "pytorch",
+        "deep learning", "algorithms", "numpy", "model deployment",
+        "mlops", "docker", "apis"
+    ],
+    "Data Analyst": [
+        "sql", "excel", "data analysis", "data visualization",
+        "python", "pandas", "tableau", "power bi",
+        "statistics", "reporting", "dashboards"
+    ],
+    "Backend Developer": [
+        "python", "java", "sql", "apis", "rest",
+        "databases", "docker", "git", "node js",
+        "server", "authentication", "microservices"
+    ],
+    "Frontend Developer": [
+        "javascript", "html", "css", "react",
+        "ui design", "typescript", "web design",
+        "responsive design", "figma", "vue js", "git"
+    ],
+    "Full Stack Developer": [
+        "javascript", "python", "html", "css", "react",
+        "sql", "apis", "git", "node js", "databases",
+        "docker", "rest", "mongodb"
+    ],
+    "DevOps Engineer": [
+        "docker", "kubernetes", "aws", "linux",
+        "ci cd", "git", "automation", "cloud computing",
+        "terraform", "monitoring", "bash", "jenkins"
+    ],
+    "Cloud Architect": [
+        "aws", "cloud computing", "azure", "gcp",
+        "docker", "kubernetes", "networking",
+        "security", "automation", "terraform", "microservices"
+    ],
+    "Cybersecurity Analyst": [
+        "networking", "security", "ethical hacking",
+        "linux", "python", "encryption", "firewalls",
+        "penetration testing", "risk analysis", "compliance"
+    ],
+    "AI Engineer": [
+        "python", "machine learning", "deep learning",
+        "tensorflow", "pytorch", "nlp", "computer vision",
+        "algorithms", "numpy", "model deployment", "mlops"
+    ],
+    "Database Administrator": [
+        "sql", "databases", "mysql", "postgresql",
+        "mongodb", "data modeling", "backup", "performance tuning",
+        "security", "linux", "oracle"
+    ],
+    "Mobile Developer": [
+        "java", "kotlin", "swift", "react native",
+        "flutter", "apis", "ui design", "git",
+        "android", "ios", "firebase"
+    ],
+}
+
+#  STEP 1 — BUILD THE TF-IDF ENGINE
+
+def compute_tf(skill_list: list) -> dict:
+
+    total  = len(skill_list)
+    counts = Counter(skill_list)
+    return {skill: count / total for skill, count in counts.items()}
+
+
+def compute_idf(all_documents: dict) -> dict:
+
+    N   = len(all_documents)
+    idf = {}
+    # Build a set of all unique skills across all roles
+    all_skills = set(
+        skill for skills in all_documents.values() for skill in skills
+    )
+    for skill in all_skills:
+        # Count how many roles contain this skill
+        docs_with_term = sum(
+            1 for skills in all_documents.values() if skill in skills
+        )
+        idf[skill] = math.log(N / docs_with_term)
+    return idf
+
+
+def compute_tfidf_vector(skill_list: list, idf: dict) -> dict:
+
+    tf     = compute_tf(skill_list)
+    vector = {skill: tf_val * idf.get(skill, 0)
+              for skill, tf_val in tf.items()}
+    return vector
+
+#  STEP 2 — COSINE SIMILARITY ENGINE
+
+def cosine_similarity(vec_a: dict, vec_b: dict) -> float:
+
+    # Dot product: sum of products of matching dimensions
+    dot_product = sum(
+        vec_a.get(skill, 0) * vec_b.get(skill, 0)
+        for skill in vec_b
+    )
+    # Magnitudes (L2 norms)
+    mag_a = math.sqrt(sum(v ** 2 for v in vec_a.values()))
+    mag_b = math.sqrt(sum(v ** 2 for v in vec_b.values()))
+
+    if mag_a == 0 or mag_b == 0:
+        return 0.0   # Cold Start protection
+
+    return dot_product / (mag_a * mag_b)
+
+#  STEP 3 — THE 4-STEP RANKING PIPELINE
+
+def recommend(user_skills: list, top_n: int = 3) -> list:
+
+    # ── Pre-process IDF on the full dataset ───
+    idf = compute_idf(JOB_ROLES)
+
+    # ── Build user profile vector ──
+    # lowercase + strip whitespace
+    clean_skills  = [s.lower().strip() for s in user_skills]
+    user_vector   = compute_tfidf_vector(clean_skills, idf)
+
+    # ── PIPELINE STEP 2: Scoring ──
+    scored_roles = []
+    for role, skills in JOB_ROLES.items():
+        role_vector = compute_tfidf_vector(skills, idf)
+        score       = cosine_similarity(user_vector, role_vector)
+
+        # Find matched skills for display
+        matched = [s for s in clean_skills if s in skills]
+
+        scored_roles.append({
+            "role"    : role,
+            "score"   : score,
+            "matched" : matched,
+            "pct"     : round(score * 100, 1)
+        })
+
+    # ── PIPELINE STEP 3: Sorting (descending) ──
+    scored_roles.sort(key=lambda x: x["score"], reverse=True)
+
+    # ── PIPELINE STEP 4: Filtering (Top-N) ──
+    return scored_roles[:top_n]
+
+#  STEP 4 — INPUT & OUTPUT
+
+def display_recommendations(results: list, user_skills: list):
+
+    print("  🎯  TOP CAREER RECOMMENDATIONS FOR YOU")
+    print("-" * 58)
+    print(f"  Your skills: {', '.join(user_skills)}")
+
+    medals = ["🥇", "🥈", "🥉"]
+    for i, r in enumerate(results):
+        medal   = medals[i] if i < 3 else f"#{i+1}"
+        bar_len = int(r["pct"] / 5)
+        bar     = "█" * bar_len + "░" * (20 - bar_len)
+
+        print(f"\n  {medal}  {r['role']}")
+        print(f"      Match Score : {bar}  {r['pct']}%")
+        if r["matched"]:
+            print(f"      Skills Hit  : {', '.join(r['matched'])}")
+        else:
+            print(f"      Skills Hit  : (No direct matches — broaden skills!)")
+
+    print("\n" + "-" * 58)
+
+
+def run_recommender():
+
+    print("  ──────── Tech Stack Recommender ────────")
+    print("\n  This engine maps YOUR skills to the best career paths")
+    print("  using TF-IDF weighting + Cosine Similarity.\n")
+    print("  Example skills you can enter:")
+    print("  python, machine learning, sql, docker, aws,")
+    print("  javascript, react, java, git, deep learning,")
+    print("  kubernetes, tensorflow, data analysis, etc.\n")
+    print("-" * 58)
+
+    # ── STEP 1: Minimum 3 skills required ──
+    user_skills = []
+    print("  Enter your skills one by one (min 3, press Enter after each).")
+    print("  Type 'done' when finished.\n")
+
+    while True:
+        prompt = f"  Skill {len(user_skills) + 1}: "
+        skill  = input(prompt).strip()
+
+        if skill.lower() == "done":
+            if len(user_skills) < 3:
+                print(f"  ⚠️  Need at least 3 skills. You've entered {len(user_skills)}.")
+                continue
+            break
+        elif skill == "":
+            continue
+        else:
+            user_skills.append(skill.lower())
+            print(f"  ✓ Added: {skill}")
+
+    # ── STEPS 2-4: Score → Sort → Filter → Output ──
+    print("\n  ⚙️  Running similarity engine...")
+    results = recommend(user_skills, top_n=3)
+    display_recommendations(results, user_skills)
+
+
+# ── DEMO MODE ───
+def demo():
+
+    test_profiles = [
+        ["python", "machine learning", "tensorflow", "deep learning"],
+        ["aws", "docker", "kubernetes", "automation", "cloud computing"],
+        ["javascript", "react", "html", "css", "ui design"],
+    ]
+
+    print("  ──────── Tech Stack Recommender ────────\n")
+
+    for profile in test_profiles:
+        results = recommend(profile, top_n=3)
+        display_recommendations(results, profile)
+        print()
+
+
+# ── ENTRY POINT ───
+if __name__ == "__main__":
+    demo()
+    run_recommender()
